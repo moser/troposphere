@@ -4,13 +4,15 @@ from troposphere import cloudformation, autoscaling
 from troposphere.autoscaling import AutoScalingGroup, Tag
 from troposphere.autoscaling import LaunchConfiguration
 from troposphere.elasticloadbalancing import LoadBalancer
-from troposphere.policies import UpdatePolicy, AutoScalingRollingUpdate
+from troposphere.policies import (
+    AutoScalingReplacingUpdate, AutoScalingRollingUpdate, UpdatePolicy
+)
 import troposphere.ec2 as ec2
 import troposphere.elasticloadbalancing as elb
 
 t = Template()
 
-t.add_description("""\
+t.set_description("""\
 Configures autoscaling group for api app""")
 
 SecurityGroup = t.add_parameter(Parameter(
@@ -124,7 +126,7 @@ ApiSubnet1 = t.add_parameter(Parameter(
     Description="First private VPC subnet ID for the api app.",
 ))
 
-LaunchConfiguration = t.add_resource(LaunchConfiguration(
+LaunchConfig = t.add_resource(LaunchConfiguration(
     "LaunchConfiguration",
     Metadata=autoscaling.Metadata(
         cloudformation.Init({
@@ -219,7 +221,7 @@ AutoscalingGroup = t.add_resource(AutoScalingGroup(
     Tags=[
         Tag("Environment", Ref(EnvType), True)
     ],
-    LaunchConfigurationName=Ref(LaunchConfiguration),
+    LaunchConfigurationName=Ref(LaunchConfig),
     MinSize=Ref(ScaleCapacity),
     MaxSize=Ref(ScaleCapacity),
     VPCZoneIdentifier=[Ref(ApiSubnet1), Ref(ApiSubnet2)],
@@ -227,6 +229,9 @@ AutoscalingGroup = t.add_resource(AutoScalingGroup(
     AvailabilityZones=[Ref(VPCAvailabilityZone1), Ref(VPCAvailabilityZone2)],
     HealthCheckType="EC2",
     UpdatePolicy=UpdatePolicy(
+        AutoScalingReplacingUpdate=AutoScalingReplacingUpdate(
+            WillReplace=True,
+        ),
         AutoScalingRollingUpdate=AutoScalingRollingUpdate(
             PauseTime='PT5M',
             MinInstancesInService="1",

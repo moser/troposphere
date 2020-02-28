@@ -1,9 +1,33 @@
 {
+    "Conditions": {
+        "WithSpotPrice": {
+            "Fn::Not": [
+                {
+                    "Fn::Equals": [
+                        {
+                            "Ref": "SpotPrice"
+                        },
+                        "0"
+                    ]
+                }
+            ]
+        }
+    },
     "Description": "Sample CloudFormation template for creating an EMR cluster",
     "Parameters": {
+        "GcTimeRatioValue": {
+            "Default": "19",
+            "Description": "Hadoop name node garbage collector time ratio",
+            "Type": "Number"
+        },
         "KeyName": {
             "Description": "Name of an existing EC2 KeyPair to enable SSH to the instances",
             "Type": "AWS::EC2::KeyPair::KeyName"
+        },
+        "SpotPrice": {
+            "Default": "0.1",
+            "Description": "Spot price (or use 0 for 'on demand' instance)",
+            "Type": "Number"
         },
         "Subnet": {
             "Description": "Subnet ID for creating the EMR cluster",
@@ -63,6 +87,7 @@
                         "Name": "Spark"
                     }
                 ],
+                "AutoScalingRole": "EMR_AutoScaling_DefaultRole",
                 "BootstrapActions": [
                     {
                         "Name": "Dummy bootstrap action",
@@ -97,7 +122,17 @@
                                 "Classification": "export",
                                 "ConfigurationProperties": {
                                     "HADOOP_DATANODE_HEAPSIZE": "2048",
-                                    "HADOOP_NAMENODE_OPTS": "-XX:GCTimeRatio=19"
+                                    "HADOOP_NAMENODE_OPTS": {
+                                        "Fn::Join": [
+                                            "",
+                                            [
+                                                "-XX:GCTimeRatio=",
+                                                {
+                                                    "Ref": "GcTimeRatioValue"
+                                                }
+                                            ]
+                                        ]
+                                    }
                                 }
                             }
                         ]
@@ -105,7 +140,55 @@
                 ],
                 "Instances": {
                     "CoreInstanceGroup": {
-                        "BidPrice": "0.1",
+                        "AutoScalingPolicy": {
+                            "Constraints": {
+                                "MaxCapacity": "3",
+                                "MinCapacity": "1"
+                            },
+                            "Rules": [
+                                {
+                                    "Action": {
+                                        "Market": "ON_DEMAND",
+                                        "SimpleScalingPolicyConfiguration": {
+                                            "AdjustmentType": "EXACT_CAPACITY",
+                                            "CoolDown": "300",
+                                            "ScalingAdjustment": "1"
+                                        }
+                                    },
+                                    "Description": "CoreAutoScalingPolicy rules",
+                                    "Name": "CoreAutoScalingPolicy",
+                                    "Trigger": {
+                                        "CloudWatchAlarmDefinition": {
+                                            "ComparisonOperator": "GREATER_THAN",
+                                            "Dimensions": [
+                                                {
+                                                    "Key": "my.custom.master.property",
+                                                    "Value": "my.custom.master.value"
+                                                }
+                                            ],
+                                            "EvaluationPeriods": "120",
+                                            "MetricName": "TestMetric",
+                                            "Namespace": "AWS/ElasticMapReduce",
+                                            "Period": "300",
+                                            "Statistic": "AVERAGE",
+                                            "Threshold": "50",
+                                            "Unit": "PERCENT"
+                                        }
+                                    }
+                                }
+                            ]
+                        },
+                        "BidPrice": {
+                            "Fn::If": [
+                                "WithSpotPrice",
+                                {
+                                    "Ref": "SpotPrice"
+                                },
+                                {
+                                    "Ref": "AWS::NoValue"
+                                }
+                            ]
+                        },
                         "EbsConfiguration": {
                             "EbsBlockDeviceConfigs": [
                                 {
@@ -116,11 +199,17 @@
                                     "VolumesPerInstance": "1"
                                 }
                             ],
-                            "EbsOptimized": "true"
+                            "EbsOptimized": true
                         },
                         "InstanceCount": "1",
                         "InstanceType": "m4.large",
-                        "Market": "SPOT",
+                        "Market": {
+                            "Fn::If": [
+                                "WithSpotPrice",
+                                "SPOT",
+                                "ON_DEMAND"
+                            ]
+                        },
                         "Name": "Core Instance"
                     },
                     "Ec2KeyName": {
@@ -130,6 +219,44 @@
                         "Ref": "Subnet"
                     },
                     "MasterInstanceGroup": {
+                        "AutoScalingPolicy": {
+                            "Constraints": {
+                                "MaxCapacity": "3",
+                                "MinCapacity": "1"
+                            },
+                            "Rules": [
+                                {
+                                    "Action": {
+                                        "Market": "ON_DEMAND",
+                                        "SimpleScalingPolicyConfiguration": {
+                                            "AdjustmentType": "EXACT_CAPACITY",
+                                            "CoolDown": "300",
+                                            "ScalingAdjustment": "1"
+                                        }
+                                    },
+                                    "Description": "MasterAutoScalingPolicy rules",
+                                    "Name": "MasterAutoScalingPolicy",
+                                    "Trigger": {
+                                        "CloudWatchAlarmDefinition": {
+                                            "ComparisonOperator": "GREATER_THAN",
+                                            "Dimensions": [
+                                                {
+                                                    "Key": "my.custom.master.property",
+                                                    "Value": "my.custom.master.value"
+                                                }
+                                            ],
+                                            "EvaluationPeriods": "120",
+                                            "MetricName": "TestMetric",
+                                            "Namespace": "AWS/ElasticMapReduce",
+                                            "Period": "300",
+                                            "Statistic": "AVERAGE",
+                                            "Threshold": "50",
+                                            "Unit": "PERCENT"
+                                        }
+                                    }
+                                }
+                            ]
+                        },
                         "InstanceCount": "1",
                         "InstanceType": "m4.large",
                         "Market": "ON_DEMAND",
@@ -141,6 +268,9 @@
                 },
                 "Name": "EMR Sample Cluster",
                 "ReleaseLabel": "emr-4.4.0",
+                "SecurityConfiguration": {
+                    "Ref": "EMRSecurityConfiguration"
+                },
                 "ServiceRole": {
                     "Ref": "EMRServiceRole"
                 },
@@ -150,9 +280,37 @@
                         "Value": "EMR Sample Cluster"
                     }
                 ],
-                "VisibleToAllUsers": "true"
+                "VisibleToAllUsers": true
             },
             "Type": "AWS::EMR::Cluster"
+        },
+        "EMRSecurityConfiguration": {
+            "Properties": {
+                "Name": "EMRSampleClusterSecurityConfiguration",
+                "SecurityConfiguration": {
+                    "EncryptionConfiguration": {
+                        "AtRestEncryptionConfiguration": {
+                            "LocalDiskEncryptionConfiguration": {
+                                "AwsKmsKey": "arn:aws:kms:us-east-1:123456789012:key/1234-1234-1234-1234-1234",
+                                "EncryptionKeyProviderType": "AwsKms"
+                            },
+                            "S3EncryptionConfiguration": {
+                                "AwsKmsKey": "arn:aws:kms:us-east-1:123456789012:key/1234-1234-1234-1234-1234",
+                                "EncryptionMode": "SSE-KMS"
+                            }
+                        },
+                        "EnableAtRestEncryption": true,
+                        "EnableInTransitEncryption": true,
+                        "InTransitEncryptionConfiguration": {
+                            "TLSCertificateConfiguration": {
+                                "CertificateProviderType": "PEM",
+                                "S3Object": "s3://MyConfigStore/artifacts/MyCerts.zip"
+                            }
+                        }
+                    }
+                }
+            },
+            "Type": "AWS::EMR::SecurityConfiguration"
         },
         "EMRServiceRole": {
             "Properties": {

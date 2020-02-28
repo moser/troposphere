@@ -2,9 +2,8 @@
 # -*- coding: utf-8 -*-
 
 import unittest
-import json
 import os
-from troposphere import Base64, Join, awsencode
+from troposphere import Base64, Join
 import troposphere.ec2 as ec2
 from troposphere.helpers import userdata
 
@@ -16,14 +15,13 @@ class TestUserdata(unittest.TestCase):
         dir = os.path.dirname(__file__)
         self.filepath = os.path.join(dir, 'userdata_test_scripts/')
 
-    def create_result(self, file):
+    def create_result(self, file, delimiter=""):
         file = os.path.join(self.filepath, file)
-        self.instance.UserData = userdata.from_file(file)
-        return json.dumps(self.instance.UserData, cls=awsencode)
+        self.instance.UserData = userdata.from_file(file, delimiter)
+        return self.instance.UserData.to_dict()
 
-    def create_answer(self, command_list):
-        return json.dumps(Base64(Join(',', command_list)),
-                          cls=awsencode)
+    def create_answer(self, command_list, delimiter=""):
+        return Base64(Join(delimiter, command_list)).to_dict()
 
     def test_simple(self):
         result = self.create_result('simple.sh')

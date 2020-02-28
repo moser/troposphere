@@ -1,7 +1,28 @@
-from . import AWSObject, AWSProperty
-from .validators import positive_integer
+import re
+from . import AWSObject, AWSProperty, Join, Tags
+from .validators import boolean, integer, positive_integer
 
-MEMORY_VALUES = [x for x in range(128, 1600, 64)]
+MEMORY_VALUES = [x for x in range(128, 3009, 64)]
+RESERVED_ENVIRONMENT_VARIABLES = [
+    'AWS_ACCESS_KEY',
+    'AWS_ACCESS_KEY_ID',
+    'AWS_DEFAULT_REGION',
+    'AWS_EXECUTION_ENV',
+    'AWS_LAMBDA_FUNCTION_MEMORY_SIZE',
+    'AWS_LAMBDA_FUNCTION_NAME',
+    'AWS_LAMBDA_FUNCTION_VERSION',
+    'AWS_LAMBDA_LOG_GROUP_NAME',
+    'AWS_LAMBDA_LOG_STREAM_NAME',
+    'AWS_REGION',
+    'AWS_SECRET_ACCESS_KEY',
+    'AWS_SECRET_KEY',
+    'AWS_SECURITY_TOKEN',
+    'AWS_SESSION_TOKEN',
+    'LAMBDA_RUNTIME_DIR',
+    'LAMBDA_TASK_ROOT',
+    'TZ'
+]
+ENVIRONMENT_VARIABLES_NAME_PATTERN = r'[a-zA-Z][a-zA-Z0-9_]+'
 
 
 def validate_memory_size(memory_value):
@@ -16,6 +37,18 @@ def validate_memory_size(memory_value):
     return memory_value
 
 
+def validate_variables_name(variables):
+    for name in variables:
+        if name in RESERVED_ENVIRONMENT_VARIABLES:
+            raise ValueError("Lambda Function environment variables names"
+                             " can't be none of:\n %s" %
+                             ", ".join(RESERVED_ENVIRONMENT_VARIABLES))
+        elif not re.match(ENVIRONMENT_VARIABLES_NAME_PATTERN, name):
+            raise ValueError("Invalid environment variable name: %s" % name)
+
+    return variables
+
+
 class Code(AWSProperty):
     props = {
         'S3Bucket': (basestring, False),
@@ -24,11 +57,55 @@ class Code(AWSProperty):
         'ZipFile': (basestring, False)
     }
 
+    @staticmethod
+    def check_zip_file(zip_file):
+        maxlength = 4096
+        toolong = (
+            "ZipFile length cannot exceed %d characters. For larger "
+            "source use S3Bucket/S3Key properties instead. "
+            "Current length: %d"
+        )
+
+        if zip_file is None:
+            return
+
+        if isinstance(zip_file, basestring):
+            z_length = len(zip_file)
+            if z_length > maxlength:
+                raise ValueError(toolong % (maxlength, z_length))
+            return
+
+        if isinstance(zip_file, Join):
+            # This code tries to combine the length of all the strings in a
+            # join. If a part is not a string, we do not count it (length 0).
+            delimiter, values = zip_file.data['Fn::Join']
+
+            # Return if there are no values to join
+            if not values or len(values) <= 0:
+                return
+
+            # Get the length of the delimiter
+            if isinstance(delimiter, basestring):
+                d_length = len(delimiter)
+            else:
+                d_length = 0
+
+            # Get the length of each value that will be joined
+            v_lengths = [len(v) for v in values if isinstance(v, basestring)]
+
+            # Add all the lengths together
+            z_length = sum(v_lengths)
+            z_length += (len(values)-1) * d_length
+
+            if z_length > maxlength:
+                raise ValueError(toolong % (maxlength, z_length))
+            return
+
     def validate(self):
         zip_file = self.properties.get('ZipFile')
         s3_bucket = self.properties.get('S3Bucket')
         s3_key = self.properties.get('S3Key')
-        s3_object_version = self.properties.get('SS3ObjectVersion')
+        s3_object_version = self.properties.get('S3ObjectVersion')
 
         if zip_file and s3_bucket:
             raise ValueError("You can't specify both 'S3Bucket' and 'ZipFile'")
@@ -38,6 +115,7 @@ class Code(AWSProperty):
             raise ValueError(
                 "You can't specify both 'S3ObjectVersion' and 'ZipFile'"
             )
+        Code.check_zip_file(zip_file)
         if not zip_file and not (s3_bucket and s3_key):
             raise ValueError(
                 "You must specify a bucket location (both the 'S3Bucket' and "
@@ -53,15 +131,66 @@ class VPCConfig(AWSProperty):
     }
 
 
+class OnFailure(AWSProperty):
+    props = {
+        'Destination': (basestring, True),
+    }
+
+
+class DestinationConfig(AWSProperty):
+    props = {
+        'OnFailure': (OnFailure, True),
+    }
+
+
+class EventInvokeConfig(AWSObject):
+    resource_type = "AWS::Lambda::EventInvokeConfig"
+
+    props = {
+        'DestinationConfig': (DestinationConfig, False),
+        'FunctionName': (basestring, True),
+        'MaximumEventAgeInSeconds': (integer, False),
+        'MaximumRetryAttempts': (integer, False),
+        'Qualifier': (basestring, True),
+    }
+
+
 class EventSourceMapping(AWSObject):
     resource_type = "AWS::Lambda::EventSourceMapping"
 
     props = {
-        'BatchSize': (positive_integer, False),
-        'Enabled': (bool, False),
+        'BatchSize': (integer, False),
+        'BisectBatchOnFunctionError': (boolean, False),
+        'DestinationConfig': (DestinationConfig, False),
+        'Enabled': (boolean, False),
         'EventSourceArn': (basestring, True),
         'FunctionName': (basestring, True),
-        'StartingPosition': (basestring, True),
+        'MaximumBatchingWindowInSeconds': (integer, False),
+        'MaximumRecordAgeInSeconds': (integer, False),
+        'MaximumRetryAttempts': (integer, False),
+        'ParallelizationFactor': (integer, False),
+        'StartingPosition': (basestring, False),
+    }
+
+
+class DeadLetterConfig(AWSProperty):
+
+    props = {
+        'TargetArn': (basestring, False),
+    }
+
+
+class Environment(AWSProperty):
+
+    props = {
+        'Variables': (validate_variables_name, True),
+    }
+
+
+class TracingConfig(AWSProperty):
+
+    props = {
+        'Mode': (basestring, False),
     }
 
 
@@ -71,12 +200,19 @@ class Function(AWSObject):
     props = {
         'Code': (Code, True),
         'Description': (basestring, False),
+        'DeadLetterConfig': (DeadLetterConfig, False),
+        'Environment': (Environment, False),
         'FunctionName': (basestring, False),
         'Handler': (basestring, True),
+        'KmsKeyArn': (basestring, False),
         'MemorySize': (validate_memory_size, False),
+        'Layers': ([basestring], False),
+        'ReservedConcurrentExecutions': (positive_integer, False),
         'Role': (basestring, True),
         'Runtime': (basestring, True),
+        'Tags': (Tags, False),
         'Timeout': (positive_integer, False),
+        'TracingConfig': (TracingConfig, False),
         'VpcConfig': (VPCConfig, False),
     }
 
@@ -86,10 +222,33 @@ class Permission(AWSObject):
 
     props = {
         'Action': (basestring, True),
+        'EventSourceToken': (basestring, False),
         'FunctionName': (basestring, True),
         'Principal': (basestring, True),
         'SourceAccount': (basestring, False),
         'SourceArn': (basestring, False),
+    }
+
+
+class VersionWeight(AWSProperty):
+
+    props = {
+        'FunctionVersion': (basestring, True),
+        'FunctionWeight': (float, True),
+    }
+
+
+class AliasRoutingConfiguration(AWSProperty):
+
+    props = {
+        'AdditionalVersionWeights': ([VersionWeight], True),
+    }
+
+
+class ProvisionedConcurrencyConfiguration(AWSProperty):
+
+    props = {
+        'ProvisionedConcurrentExecutions': (integer, True),
     }
 
 
@@ -101,6 +260,9 @@ class Alias(AWSObject):
         'FunctionName': (basestring, True),
         'FunctionVersion': (basestring, True),
         'Name': (basestring, True),
+        'ProvisionedConcurrencyConfig':
+            (ProvisionedConcurrencyConfiguration, False),
+        'RoutingConfig': (AliasRoutingConfiguration, False),
     }
 
 
@@ -111,4 +273,37 @@ class Version(AWSObject):
         'CodeSha256': (basestring, False),
         'Description': (basestring, False),
         'FunctionName': (basestring, True),
+        'ProvisionedConcurrencyConfig':
+            (ProvisionedConcurrencyConfiguration, False),
+    }
+
+
+class Content(AWSProperty):
+    props = {
+        'S3Bucket': (basestring, True),
+        'S3Key': (basestring, True),
+        'S3ObjectVersion': (basestring, False),
+    }
+
+
+class LayerVersion(AWSObject):
+    resource_type = "AWS::Lambda::LayerVersion"
+
+    props = {
+        'CompatibleRuntimes': ([basestring], False),
+        'Content': (Content, True),
+        'Description': (basestring, False),
+        'LayerName': (basestring, False),
+        'LicenseInfo': (basestring, False),
+    }
+
+
+class LayerVersionPermission(AWSObject):
+    resource_type = "AWS::Lambda::LayerVersionPermission"
+
+    props = {
+        'Action': (basestring, True),
+        'LayerVersionArn': (basestring, True),
+        'OrganizationId': (basestring, False),
+        'Principal': (basestring, True),
     }

@@ -3,8 +3,8 @@
 #
 # See LICENSE file for full license.
 
-from . import AWSObject, AWSProperty
-from .validators import boolean, integer
+from . import AWSObject, AWSProperty, Tags
+from .validators import boolean, integer, mutually_exclusive
 
 
 class Source(AWSProperty):
@@ -53,6 +53,7 @@ def validate_volume_type(volume_type):
 
 class VolumeConfiguration(AWSProperty):
     props = {
+        'Encrypted': (boolean, False),
         'Iops': (integer, False),
         'MountPoint': (basestring, True),
         'NumberOfDisks': (integer, True),
@@ -116,12 +117,33 @@ class LoadBasedAutoScaling(AWSProperty):
     }
 
 
+def validate_data_source_type(data_source_type):
+    data_source_types = (
+        'AutoSelectOpsworksMysqlInstance',
+        'OpsworksMysqlInstance',
+        'RdsDbInstance'
+    )
+    if data_source_type not in data_source_types:
+        raise ValueError("Type (given: %s) must be one of: %s" % (
+            data_source_type, ', '.join(data_source_types)))
+    return data_source_type
+
+
+class DataSource(AWSProperty):
+    props = {
+        'Arn': (basestring, False),
+        'DatabaseName': (basestring, False),
+        'Type': (validate_data_source_type, False)
+    }
+
+
 class App(AWSObject):
     resource_type = "AWS::OpsWorks::App"
 
     props = {
         'AppSource': (Source, False),
         'Attributes': (dict, False),
+        'DataSources': ([DataSource], False),
         'Description': (basestring, False),
         'Domains': ([basestring], False),
         'EnableSsl': (boolean, False),
@@ -140,17 +162,49 @@ class ElasticLoadBalancerAttachment(AWSObject):
     props = {
         'ElasticLoadBalancerName': (basestring, True),
         'LayerId': (basestring, True),
+        'Tags': ((Tags, list), False),
     }
+
+
+class EbsBlockDevice(AWSProperty):
+    props = {
+        'DeleteOnTermination': (boolean, False),
+        'Iops': (integer, False),
+        'SnapshotId': (basestring, False),
+        'VolumeSize': (integer, False),
+        'VolumeType': (basestring, False),
+    }
+
+
+class BlockDeviceMapping(AWSProperty):
+    props = {
+        'DeviceName': (basestring, False),
+        'Ebs': (EbsBlockDevice, False),
+        'NoDevice': (basestring, False),
+        'VirtualName': (basestring, False),
+    }
+
+    def validate(self):
+        conds = [
+            'Ebs',
+            'VirtualName',
+        ]
+        mutually_exclusive(self.__class__.__name__, self.properties, conds)
 
 
 class Instance(AWSObject):
     resource_type = "AWS::OpsWorks::Instance"
 
     props = {
+        'AgentVersion': (basestring, False),
         'AmiId': (basestring, False),
         'Architecture': (basestring, False),
         'AutoScalingType': (basestring, False),
         'AvailabilityZone': (basestring, False),
+        'BlockDeviceMappings': ([BlockDeviceMapping], False),
+        'EbsOptimized': (boolean, False),
+        'ElasticIps': ([basestring], False),
+        'Hostname': (basestring, False),
         'InstallUpdatesOnBoot': (boolean, False),
         'InstanceType': (basestring, True),
         'LayerIds': ([basestring], True),
@@ -159,7 +213,10 @@ class Instance(AWSObject):
         'SshKeyName': (basestring, False),
         'StackId': (basestring, True),
         'SubnetId': (basestring, False),
+        'Tenancy': (basestring, False),
         'TimeBasedAutoScaling': (TimeBasedAutoScaling, False),
+        'VirtualizationType': (basestring, False),
+        'Volumes': ([basestring], False),
     }
 
 
@@ -184,6 +241,7 @@ class Layer(AWSObject):
         'AutoAssignElasticIps': (boolean, True),
         'AutoAssignPublicIps': (boolean, True),
         'CustomInstanceProfileArn': (basestring, False),
+        'CustomJson': ((basestring, dict), False),
         'CustomRecipes': (Recipes, False),
         'CustomSecurityGroupIds': ([basestring], False),
         'EnableAutoHealing': (boolean, True),
@@ -199,6 +257,21 @@ class Layer(AWSObject):
     }
 
 
+class RdsDbInstance(AWSProperty):
+    props = {
+        'DbPassword': (basestring, True),
+        'DbUser': (basestring, True),
+        'RdsDbInstanceArn': (basestring, True)
+    }
+
+
+class ElasticIp(AWSProperty):
+    props = {
+        'Ip': (basestring, True),
+        'Name': (basestring, False),
+    }
+
+
 class Stack(AWSObject):
     resource_type = "AWS::OpsWorks::Stack"
 
@@ -206,18 +279,25 @@ class Stack(AWSObject):
         'AgentVersion': (basestring, False),
         'Attributes': (dict, False),
         'ChefConfiguration': (ChefConfiguration, False),
+        'CloneAppIds': ([basestring], False),
+        'ClonePermissions': (boolean, False),
         'ConfigurationManager': (StackConfigurationManager, False),
         'CustomCookbooksSource': (Source, False),
-        'CustomJson': (dict, False),
+        'CustomJson': ((basestring, dict), False),
         'DefaultAvailabilityZone': (basestring, False),
         'DefaultInstanceProfileArn': (basestring, True),
         'DefaultOs': (basestring, False),
         'DefaultRootDeviceType': (basestring, False),
         'DefaultSshKeyName': (basestring, False),
         'DefaultSubnetId': (basestring, False),
+        'EcsClusterArn': (basestring, False),
+        'ElasticIps': ([ElasticIp], False),
         'HostnameTheme': (basestring, False),
         'Name': (basestring, True),
+        'RdsDbInstances': ([RdsDbInstance], False),
         'ServiceRoleArn': (basestring, True),
+        'SourceStackId': (basestring, False),
+        'Tags': ((Tags, list), False),
         'UseCustomCookbooks': (boolean, False),
         'UseOpsworksSecurityGroups': (boolean, False),
         'VpcId': (basestring, False),
@@ -229,3 +309,60 @@ class Stack(AWSObject):
             raise ValueError('Using VpcId requires DefaultSubnetId to be'
                              'specified')
         return True
+
+
+class UserProfile(AWSObject):
+    resource_type = "AWS::OpsWorks::UserProfile"
+
+    props = {
+        'AllowSelfManagement': (boolean, False),
+        'IamUserArn': (basestring, True),
+        'SshPublicKey': (basestring, False),
+        'SshUsername': (basestring, False),
+    }
+
+
+class Volume(AWSObject):
+    resource_type = "AWS::OpsWorks::Volume"
+
+    props = {
+        'Ec2VolumeId': (basestring, True),
+        'MountPoint': (basestring, False),
+        'Name': (basestring, False),
+        'StackId': (basestring, True),
+    }
+
+
+class EngineAttribute(AWSProperty):
+    props = {
+        'Name': (basestring, False),
+        'Value': (basestring, False),
+    }
+
+
+class Server(AWSObject):
+    resource_type = "AWS::OpsWorksCM::Server"
+
+    props = {
+        'AssociatePublicIpAddress': (boolean, False),
+        'BackupId': (basestring, False),
+        'BackupRetentionCount': (integer, False),
+        'CustomCertificate': (basestring, False),
+        'CustomDomain': (basestring, False),
+        'CustomPrivateKey': (basestring, False),
+        'DisableAutomatedBackup': (boolean, False),
+        'Engine': (basestring, False),
+        'EngineAttributes': ([EngineAttribute], False),
+        'EngineModel': (basestring, False),
+        'EngineVersion': (basestring, False),
+        'InstanceProfileArn': (basestring, True),
+        'InstanceType': (basestring, True),
+        'KeyPair': (basestring, False),
+        'PreferredBackupWindow': (basestring, False),
+        'PreferredMaintenanceWindow': (basestring, False),
+        'SecurityGroupIds': ([basestring], False),
+        'ServerName': (basestring, False),
+        'ServiceRoleArn': (basestring, True),
+        'SubnetIds': ([basestring], False),
+        'Tags': ((Tags, list), False),
+    }

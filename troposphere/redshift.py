@@ -3,8 +3,15 @@
 #
 # See LICENSE file for full license.
 
-from . import AWSObject, AWSProperty
+from . import AWSObject, AWSProperty, Tags
 from .validators import boolean, integer
+
+
+class LoggingProperties(AWSProperty):
+    props = {
+        'BucketName': (basestring, True),
+        'S3KeyPrefix': (basestring, False),
+    }
 
 
 class Cluster(AWSObject):
@@ -14,6 +21,7 @@ class Cluster(AWSObject):
         'AllowVersionUpgrade': (boolean, False),
         'AutomatedSnapshotRetentionPeriod': (integer, False),
         'AvailabilityZone': (basestring, False),
+        'ClusterIdentifier': (basestring, False),
         'ClusterParameterGroupName': (basestring, False),
         'ClusterSecurityGroups': (list, False),
         'ClusterSubnetGroupName': (basestring, False),
@@ -24,7 +32,9 @@ class Cluster(AWSObject):
         'Encrypted': (boolean, False),
         'HsmClientCertificateIdentifier': (basestring, False),
         'HsmConfigurationIdentifier': (basestring, False),
+        'IamRoles': ([basestring], False),
         'KmsKeyId': (basestring, False),
+        'LoggingProperties': (LoggingProperties, False),
         'MasterUsername': (basestring, True),
         'MasterUserPassword': (basestring, True),
         'NodeType': (basestring, True),
@@ -35,6 +45,7 @@ class Cluster(AWSObject):
         'PubliclyAccessible': (boolean, False),
         'SnapshotClusterIdentifier': (basestring, False),
         'SnapshotIdentifier': (basestring, False),
+        'Tags': (Tags, False),
         'VpcSecurityGroupIds': (list, False),
     }
 
@@ -53,6 +64,7 @@ class ClusterParameterGroup(AWSObject):
         'Description': (basestring, True),
         'ParameterGroupFamily': (basestring, True),
         'Parameters': ([AmazonRedshiftParameter], False),
+        'Tags': (Tags, False),
     }
 
 
@@ -61,6 +73,7 @@ class ClusterSecurityGroup(AWSObject):
 
     props = {
         'Description': (basestring, True),
+        'Tags': (Tags, False),
     }
 
 
@@ -81,4 +94,5 @@ class ClusterSubnetGroup(AWSObject):
     props = {
         'Description': (basestring, True),
         'SubnetIds': (list, True),
+        'Tags': (Tags, False),
     }

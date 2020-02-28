@@ -2,8 +2,9 @@ from troposphere import Ref, Template, Output
 from troposphere.apigateway import RestApi, Method
 from troposphere.apigateway import Resource, MethodResponse
 from troposphere.apigateway import Integration, IntegrationResponse
-from troposphere.apigateway import Deployment
-from troposphere.apigateway import ApiKey, StageKey
+from troposphere.apigateway import Deployment, Stage, ApiStage
+from troposphere.apigateway import UsagePlan, QuotaSettings, ThrottleSettings
+from troposphere.apigateway import ApiKey, StageKey, UsagePlanKey
 from troposphere.iam import Role, Policy
 from troposphere.awslambda import Function, Code
 from troposphere import GetAtt, Join
@@ -66,7 +67,7 @@ foobar_function = t.add_resource(Function(
     ),
     Handler="index.handler",
     Role=GetAtt("LambdaExecutionRole", "Arn"),
-    Runtime="nodejs",
+    Runtime="nodejs4.3",
 ))
 
 # Create a resource to map the lambda function to
@@ -110,19 +111,54 @@ method = t.add_resource(Method(
 
 # Create a deployment
 stage_name = 'v1'
+
 deployment = t.add_resource(Deployment(
     "%sDeployment" % stage_name,
+    DependsOn="LambdaMethod",
     RestApiId=Ref(rest_api),
-    StageName=stage_name
+))
+
+stage = t.add_resource(Stage(
+    '%sStage' % stage_name,
+    StageName=stage_name,
+    RestApiId=Ref(rest_api),
+    DeploymentId=Ref(deployment)
 ))
 
 key = t.add_resource(ApiKey(
     "ApiKey",
     StageKeys=[StageKey(
         RestApiId=Ref(rest_api),
-        StageName=stage_name
-    )],
-    Enabled=True
+        StageName=Ref(stage)
+    )]
+))
+
+# Create an API usage plan
+usagePlan = t.add_resource(UsagePlan(
+    "ExampleUsagePlan",
+    UsagePlanName="ExampleUsagePlan",
+    Description="Example usage plan",
+    Quota=QuotaSettings(
+        Limit=50000,
+        Period="MONTH"
+    ),
+    Throttle=ThrottleSettings(
+        BurstLimit=500,
+        RateLimit=5000
+    ),
+    ApiStages=[
+        ApiStage(
+            ApiId=Ref(rest_api),
+            Stage=Ref(stage)
+        )]
+))
+
+# tie the usage plan and key together
+usagePlanKey = t.add_resource(UsagePlanKey(
+    "ExampleUsagePlanKey",
+    KeyId=Ref(key),
+    KeyType="API_KEY",
+    UsagePlanId=Ref(usagePlan)
 ))
 
 # Add the deployment endpoint as an output

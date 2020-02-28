@@ -9,7 +9,21 @@ class TestLogs(unittest.TestCase):
             "LogGroupWithDeletionPolicy",
             DeletionPolicy=Retain
         )
-        self.assertIn('DeletionPolicy', log_group.JSONrepr())
+        self.assertIn('DeletionPolicy', log_group.to_dict())
+
+    def test_loggroup_retention(self):
+        for days in [7, "7"]:
+            LogGroup(
+                "LogGroupWithDeletionPolicy",
+                RetentionInDays=days,
+            )
+
+        for days in [6, "6"]:
+            with self.assertRaises(ValueError):
+                LogGroup(
+                    "LogGroupWithDeletionPolicy",
+                    RetentionInDays=days,
+                )
 
     def test_log_destination(self):
         log_destination = Destination(
@@ -19,7 +33,7 @@ class TestLogs(unittest.TestCase):
             TargetArn='target-arn',
             DestinationPolicy='destination-policy'
         )
-        log_destination_json = log_destination.JSONrepr()
+        log_destination_json = log_destination.to_dict()
         self.assertIn('Type', log_destination_json)
         self.assertIn('Properties', log_destination_json)
 

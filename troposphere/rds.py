@@ -5,18 +5,23 @@
 
 import re
 
-from . import AWSHelperFn, AWSObject, AWSProperty
-from .validators import boolean, network_port, integer, positive_integer
+from . import AWSHelperFn, AWSObject, AWSProperty, Tags
+from .validators import (boolean, network_port, integer, positive_integer,
+                         integer_range)
 
 # Taken from:
 # http://docs.aws.amazon.com/AmazonRDS/latest/APIReference/API_CreateDBInstance.html
 
 VALID_STORAGE_TYPES = ('standard', 'gp2', 'io1')
-VALID_DB_ENGINES = ('MySQL', 'oracle-se1', 'oracle-se', 'oracle-ee',
-                    'sqlserver-ee', 'sqlserver-se', 'sqlserver-ex',
-                    'sqlserver-web', 'postgres', 'aurora', 'mariadb')
+VALID_DB_ENGINES = ('MySQL', 'mysql', 'oracle-se1', 'oracle-se2', 'oracle-se',
+                    'oracle-ee', 'sqlserver-ee', 'sqlserver-se',
+                    'sqlserver-ex', 'sqlserver-web', 'postgres', 'aurora',
+                    'aurora-mysql', 'aurora-postgresql', 'mariadb')
+VALID_DB_ENGINE_MODES = ('provisioned', 'serverless', 'parallelquery',
+                         'global', 'multimaster')
 VALID_LICENSE_MODELS = ('license-included', 'bring-your-own-license',
                         'general-public-license', 'postgresql-license')
+VALID_SCALING_CONFIGURATION_CAPACITIES = (1, 2, 4, 8, 16, 32, 64, 128, 256)
 
 
 def validate_iops(iops):
@@ -46,6 +51,15 @@ def validate_engine(engine):
         raise ValueError("DBInstance Engine must be one of: %s" %
                          ", ".join(VALID_DB_ENGINES))
     return engine
+
+
+def validate_engine_mode(engine_mode):
+    """Validate database EngineMode for DBCluster"""
+
+    if engine_mode not in VALID_DB_ENGINE_MODES:
+        raise ValueError("DBCluster EngineMode must be one of: %s" %
+                         ", ".join(VALID_DB_ENGINE_MODES))
+    return engine_mode
 
 
 def validate_license_model(license_model):
@@ -119,16 +133,49 @@ def validate_backup_retention_period(days):
     return days
 
 
+def validate_capacity(capacity):
+    """Validate ScalingConfiguration capacity for serverless DBCluster"""
+
+    if capacity not in VALID_SCALING_CONFIGURATION_CAPACITIES:
+        raise ValueError(
+            "ScalingConfiguration capacity must be one of: {}".format(
+                ", ".join(map(
+                    str,
+                    VALID_SCALING_CONFIGURATION_CAPACITIES
+                ))
+            )
+        )
+    return capacity
+
+
+class DBInstanceRole(AWSProperty):
+    props = {
+        'FeatureName': (basestring, True),
+        'RoleArn': (basestring, True),
+        'Status': (basestring, False),
+    }
+
+
+class ProcessorFeature(AWSProperty):
+    props = {
+        'Name': (basestring, False),
+        'Value': (basestring, False),
+    }
+
+
 class DBInstance(AWSObject):
     resource_type = "AWS::RDS::DBInstance"
 
     props = {
         'AllocatedStorage': (positive_integer, False),
         'AllowMajorVersionUpgrade': (boolean, False),
+        'AssociatedRoles': ([DBInstanceRole], False),
         'AutoMinorVersionUpgrade': (boolean, False),
         'AvailabilityZone': (basestring, False),
         'BackupRetentionPeriod': (validate_backup_retention_period, False),
+        'CACertificateIdentifier': (basestring, False),
         'CharacterSetName': (basestring, False),
+        'CopyTagsToSnapshot': (boolean, False),
         'DBClusterIdentifier': (basestring, False),
         'DBInstanceClass': (basestring, True),
         'DBInstanceIdentifier': (basestring, False),
@@ -137,33 +184,56 @@ class DBInstance(AWSObject):
         'DBSecurityGroups': (list, False),
         'DBSnapshotIdentifier': (basestring, False),
         'DBSubnetGroupName': (basestring, False),
-        'Engine': (validate_engine, True),
+        'DeleteAutomatedBackups': (boolean, False),
+        'DeletionProtection': (boolean, False),
+        'Domain': (basestring, False),
+        'DomainIAMRoleName': (basestring, False),
+        'EnableCloudwatchLogsExports': ([basestring], False),
+        'EnableIAMDatabaseAuthentication': (boolean, False),
+        'EnablePerformanceInsights': (boolean, False),
+        'Engine': (validate_engine, False),
         'EngineVersion': (basestring, False),
         'Iops': (validate_iops, False),
         'KmsKeyId': (basestring, False),
         'LicenseModel': (validate_license_model, False),
         'MasterUsername': (basestring, False),
         'MasterUserPassword': (basestring, False),
+        'MaxAllocatedStorage': (integer, False),
+        'MonitoringInterval': (positive_integer, False),
+        'MonitoringRoleArn': (basestring, False),
         'MultiAZ': (boolean, False),
         'OptionGroupName': (basestring, False),
+        'PerformanceInsightsKMSKeyId': (basestring, False),
+        'PerformanceInsightsRetentionPeriod': (positive_integer, False),
         'Port': (network_port, False),
         'PreferredBackupWindow': (validate_backup_window, False),
         'PreferredMaintenanceWindow': (basestring, False),
+        'ProcessorFeatures': ([ProcessorFeature], False),
+        'PromotionTier': (positive_integer, False),
         'PubliclyAccessible': (boolean, False),
         'SourceDBInstanceIdentifier': (basestring, False),
+        'SourceRegion': (basestring, False),
         'StorageEncrypted': (boolean, False),
         'StorageType': (basestring, False),
-        'Tags': (list, False),
+        'Tags': ((Tags, list), False),
+        'UseDefaultProcessorFeatures': (boolean, False),
+        'Timezone': (basestring, False),
         'VPCSecurityGroups': ([basestring], False),
     }
 
     def validate(self):
+        if 'DBSnapshotIdentifier' not in self.properties:
+            if 'Engine' not in self.properties:
+                raise ValueError(
+                    'Resource Engine is required in type %s'
+                    % self.resource_type)
+
         if 'SourceDBInstanceIdentifier' in self.properties:
 
             invalid_replica_properties = (
                 'BackupRetentionPeriod', 'DBName', 'MasterUsername',
                 'MasterUserPassword', 'PreferredBackupWindow', 'MultiAZ',
-                'DBSnapshotIdentifier', 'DBSubnetGroupName',
+                'DBSnapshotIdentifier',
             )
 
             invalid_properties = [s for s in self.properties.keys() if
@@ -182,9 +252,9 @@ class DBInstance(AWSObject):
              'MasterUserPassword' not in self.properties) and \
                 ('DBClusterIdentifier' not in self.properties):
             raise ValueError(
-                'Either (MasterUsername and MasterUserPassword) or'
-                ' DBSnapshotIdentifier are required in type '
-                'AWS::RDS::DBInstance.'
+                r"Either (MasterUsername and MasterUserPassword) or"
+                r" DBSnapshotIdentifier are required in type "
+                r"AWS::RDS::DBInstance."
             )
 
         if 'KmsKeyId' in self.properties and \
@@ -199,8 +269,7 @@ class DBInstance(AWSObject):
         multi_az = self.properties.get('MultiAZ', None)
         if not (isinstance(avail_zone, (AWSHelperFn, nonetype)) and
                 isinstance(multi_az, (AWSHelperFn, nonetype))):
-            if 'AvailabilityZone' in self.properties and \
-                    self.properties.get('MultiAZ', None):
+            if avail_zone and multi_az in [True, 1, '1', 'true', 'True']:
                 raise ValueError("AvailabiltyZone cannot be set on "
                                  "DBInstance if MultiAZ is set to true.")
 
@@ -211,16 +280,16 @@ class DBInstance(AWSObject):
 
         allocated_storage = self.properties.get('AllocatedStorage')
         iops = self.properties.get('Iops', None)
-        if iops:
+        if iops and not isinstance(iops, AWSHelperFn):
             if not isinstance(allocated_storage, AWSHelperFn) and \
-                    allocated_storage < 100:
+                    int(allocated_storage) < 100:
                 raise ValueError("AllocatedStorage must be at least 100 when "
                                  "Iops is set.")
             if not isinstance(allocated_storage, AWSHelperFn) and not \
                     isinstance(iops, AWSHelperFn) and \
-                    float(iops) / float(allocated_storage) > 10.0:
+                    float(iops) / float(allocated_storage) > 50.0:
                 raise ValueError("AllocatedStorage must be no less than "
-                                 "1/10th the provisioned Iops")
+                                 "1/50th the provisioned Iops")
 
         return True
 
@@ -232,7 +301,7 @@ class DBParameterGroup(AWSObject):
         'Description': (basestring, False),
         'Family': (basestring, False),
         'Parameters': (dict, False),
-        'Tags': (list, False),
+        'Tags': ((Tags, list), False),
     }
 
 
@@ -241,8 +310,9 @@ class DBSubnetGroup(AWSObject):
 
     props = {
         'DBSubnetGroupDescription': (basestring, True),
+        'DBSubnetGroupName': (basestring, False),
         'SubnetIds': (list, True),
-        'Tags': (list, False),
+        'Tags': ((Tags, list), False),
     }
 
 
@@ -262,7 +332,7 @@ class DBSecurityGroup(AWSObject):
         'EC2VpcId': (basestring, False),
         'DBSecurityGroupIngress': (list, True),
         'GroupDescription': (basestring, True),
-        'Tags': (list, False),
+        'Tags': ((Tags, list), False),
     }
 
 
@@ -302,6 +372,7 @@ class OptionConfiguration(AWSProperty):
         'DBSecurityGroupMemberships': ([basestring], False),
         'OptionName': (basestring, True),
         'OptionSettings': ([OptionSetting], False),
+        'OptionVersion': (basestring, False),
         'Port': (network_port, False),
         'VpcSecurityGroupMemberships': ([basestring], False),
     }
@@ -315,7 +386,7 @@ class OptionGroup(AWSObject):
         'MajorEngineVersion': (basestring, True),
         'OptionGroupDescription': (basestring, True),
         'OptionConfigurations': ([OptionConfiguration], True),
-        'Tags': (list, False),
+        'Tags': ((Tags, list), False),
     }
 
 
@@ -326,7 +397,24 @@ class DBClusterParameterGroup(AWSObject):
         'Description': (basestring, True),
         'Family': (basestring, True),
         'Parameters': (dict, False),
-        'Tags': (list, False),
+        'Tags': ((Tags, list), False),
+    }
+
+
+class DBClusterRole(AWSProperty):
+    props = {
+        'FeatureName': (basestring, False),
+        'RoleArn': (basestring, True),
+        'Status': (basestring, False),
+    }
+
+
+class ScalingConfiguration(AWSProperty):
+    props = {
+        'AutoPause': (boolean, False),
+        'MaxCapacity': (validate_capacity, False),
+        'MinCapacity': (validate_capacity, False),
+        'SecondsUntilAutoPause': (positive_integer, False),
     }
 
 
@@ -334,12 +422,20 @@ class DBCluster(AWSObject):
     resource_type = "AWS::RDS::DBCluster"
 
     props = {
+        'AssociatedRoles': ([DBClusterRole], False),
         'AvailabilityZones': ([basestring], False),
+        'BacktrackWindow': (integer_range(0, 259200), False),
         'BackupRetentionPeriod': (validate_backup_retention_period, False),
         'DatabaseName': (basestring, False),
+        'DBClusterIdentifier': (basestring, False),
         'DBClusterParameterGroupName': (basestring, False),
         'DBSubnetGroupName': (basestring, False),
+        'DeletionProtection': (boolean, False),
+        'EnableCloudwatchLogsExports': ([basestring], False),
+        'EnableHttpEndpoint': (boolean, False),
+        'EnableIAMDatabaseAuthentication': (boolean, False),
         'Engine': (validate_engine, True),
+        'EngineMode': (validate_engine_mode, False),
         'EngineVersion': (basestring, False),
         'KmsKeyId': (basestring, False),
         'MasterUsername': (basestring, False),
@@ -347,8 +443,14 @@ class DBCluster(AWSObject):
         'Port': (network_port, False),
         'PreferredBackupWindow': (validate_backup_window, False),
         'PreferredMaintenanceWindow': (basestring, False),
+        'ReplicationSourceIdentifier': (basestring, False),
+        'RestoreType': (basestring, False),
+        'ScalingConfiguration': (ScalingConfiguration, False),
         'SnapshotIdentifier': (basestring, False),
+        'SourceDBClusterIdentifier': (basestring, False),
+        'SourceRegion': (basestring, False),
         'StorageEncrypted': (boolean, False),
-        'Tags': (list, False),
+        'Tags': ((Tags, list), False),
+        'UseLatestRestorableTime': (boolean, False),
         'VpcSecurityGroupIds': ([basestring], False),
     }

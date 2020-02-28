@@ -1,22 +1,18 @@
 # Converted from DynamoDB_Table.template located at:
 # http://aws.amazon.com/cloudformation/aws-cloudformation-templates/
-#
-# Note: This implementation is being phased out, you should instead look at
-#       the DynamoDB2_* examples for the new implementation.
-#
 
 from troposphere import Output, Parameter, Ref, Template
-from troposphere.dynamodb import (Key, AttributeDefinition,
+from troposphere.dynamodb import (KeySchema, AttributeDefinition,
                                   ProvisionedThroughput)
 from troposphere.dynamodb import Table
 
 t = Template()
 
-t.add_description("AWS CloudFormation Sample Template: This template "
+t.set_description("AWS CloudFormation Sample Template: This template "
                   "demonstrates the creation of a DynamoDB table.")
 
 hashkeyname = t.add_parameter(Parameter(
-    "HaskKeyElementName",
+    "HashKeyElementName",
     Description="HashType PrimaryKey Name",
     Type="String",
     AllowedPattern="[a-zA-Z0-9]*",
@@ -26,7 +22,7 @@ hashkeyname = t.add_parameter(Parameter(
 ))
 
 hashkeytype = t.add_parameter(Parameter(
-    "HaskKeyElementType",
+    "HashKeyElementType",
     Description="HashType PrimaryKey Type",
     Type="String",
     Default="S",
@@ -59,14 +55,20 @@ writeunits = t.add_parameter(Parameter(
 myDynamoDB = t.add_resource(Table(
     "myDynamoDBTable",
     AttributeDefinitions=[
-        AttributeDefinition(Ref(hashkeyname), Ref(hashkeytype)),
+        AttributeDefinition(
+            AttributeName=Ref(hashkeyname),
+            AttributeType=Ref(hashkeytype)
+        ),
     ],
     KeySchema=[
-        Key(Ref(hashkeyname), "HASH")
+        KeySchema(
+            AttributeName=Ref(hashkeyname),
+            KeyType="HASH"
+        )
     ],
     ProvisionedThroughput=ProvisionedThroughput(
-        Ref(readunits),
-        Ref(writeunits)
+        ReadCapacityUnits=Ref(readunits),
+        WriteCapacityUnits=Ref(writeunits)
     )
 ))
 

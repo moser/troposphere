@@ -3,16 +3,10 @@
 #
 # See LICENSE file for full license.
 
-from . import AWSObject, AWSProperty
+from . import AWSObject, AWSProperty, Tags
+from .compat import policytypes
 from .validators import integer, boolean, status
-from .validators import iam_path, iam_role_name, iam_group_name
-
-try:
-    from awacs.aws import Policy
-    policytypes = (dict, Policy)
-except ImportError:
-    policytypes = dict,
-
+from .validators import iam_path, iam_role_name, iam_group_name, iam_user_name
 
 Active = "Active"
 Inactive = "Inactive"
@@ -23,8 +17,7 @@ class AccessKey(AWSObject):
 
     props = {
         'Serial': (integer, False),
-        # XXX - Is Status required? Docs say yes, examples say no
-        'Status': (status, True),
+        'Status': (status, False),
         'UserName': (basestring, True),
     }
 
@@ -47,16 +40,15 @@ class Policy(AWSProperty):
         'PolicyName': (basestring, True),
     }
 
+
 PolicyProperty = Policy
 
 
 class Group(AWSObject):
-    def validate_title(self):
-        iam_group_name(self.title)
-
     resource_type = "AWS::IAM::Group"
 
     props = {
+        'GroupName': (iam_group_name, False),
         'ManagedPolicyArns': ([basestring], False),
         'Path': (iam_path, False),
         'Policies': ([Policy], False),
@@ -69,20 +61,33 @@ class InstanceProfile(AWSObject):
     props = {
         'Path': (iam_path, False),
         'Roles': (list, True),
+        'InstanceProfileName': (basestring, False),
     }
 
 
 class Role(AWSObject):
-    def validate_title(self):
-        iam_role_name(self.title)
-
     resource_type = "AWS::IAM::Role"
 
     props = {
         'AssumeRolePolicyDocument': (policytypes, True),
+        'Description': (basestring, False),
         'ManagedPolicyArns': ([basestring], False),
+        'MaxSessionDuration': (integer, False),
         'Path': (iam_path, False),
+        'PermissionsBoundary': (basestring, False),
         'Policies': ([Policy], False),
+        'RoleName': (iam_role_name, False),
+        'Tags': ((Tags, list), False),
+    }
+
+
+class ServiceLinkedRole(AWSObject):
+    resource_type = "AWS::IAM::ServiceLinkedRole"
+
+    props = {
+        'AWSServiceName': (basestring, True),
+        'CustomSuffix': (basestring, False),
+        'Description': (basestring, False),
     }
 
 
@@ -97,11 +102,14 @@ class User(AWSObject):
     resource_type = "AWS::IAM::User"
 
     props = {
-        'Path': (iam_path, False),
         'Groups': ([basestring], False),
-        'ManagedPolicyArns': ([basestring], False),
         'LoginProfile': (LoginProfile, False),
+        'ManagedPolicyArns': ([basestring], False),
+        'Path': (iam_path, False),
+        'PermissionsBoundary': (basestring, False),
         'Policies': ([Policy], False),
+        'Tags': (Tags, False),
+        'UserName': (iam_user_name, False),
     }
 
 
@@ -120,6 +128,7 @@ class ManagedPolicy(AWSObject):
     props = {
         'Description': (basestring, False),
         'Groups': ([basestring], False),
+        'ManagedPolicyName': (basestring, False),
         'Path': (iam_path, False),
         'PolicyDocument': (policytypes, True),
         'Roles': ([basestring], False),

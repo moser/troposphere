@@ -3,9 +3,9 @@
 #
 # See LICENSE file for full license.
 
-from . import AWSObject, AWSProperty
+from . import AWSObject, AWSProperty, Tags
 from .validators import (
-    boolean, integer_range, positive_integer, network_port, integer)
+    boolean, elb_name, integer_range, positive_integer, network_port, integer)
 
 
 class AppCookieStickinessPolicy(AWSProperty):
@@ -88,11 +88,11 @@ class LoadBalancer(AWSObject):
         'HealthCheck': (HealthCheck, False),
         'Instances': (list, False),
         'LBCookieStickinessPolicy': (list, False),
-        'LoadBalancerName': (basestring, False),
+        'LoadBalancerName': (elb_name, False),
         'Listeners': (list, True),
         'Policies': (list, False),
         'Scheme': (basestring, False),
         'SecurityGroups': (list, False),
         'Subnets': (list, False),
-        'Tags': (list, False),
+        'Tags': ((Tags, list), False),
     }

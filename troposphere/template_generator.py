@@ -16,6 +16,7 @@ Usage:
 import inspect
 import pkgutil
 import importlib
+import os
 
 from collections import Sequence, Mapping
 
@@ -24,26 +25,37 @@ from troposphere import (
     Output, Parameter,  # AWSDeclarations
     AWSObject,  # covers resources
     AWSHelperFn, GenericHelperFn,  # covers ref, fn::, etc
-    autoscaling, cloudformation)
+    Tags, autoscaling, cloudformation, Export)
 from troposphere.policies import UpdatePolicy, CreationPolicy
 
 
 class TemplateGenerator(Template):
-    DEPRECATED_MODULES = ['troposphere.dynamodb']
+    DEPRECATED_MODULES = ['troposphere.dynamodb2']
+    EXCLUDE_MODULES = DEPRECATED_MODULES + [
+        'troposphere.openstack.heat',
+        'troposphere.openstack.neutron',
+        'troposphere.openstack.nova',
+    ]
 
     _inspect_members = set()
     _inspect_resources = {}
+    _custom_members = set()
     _inspect_functions = {}
 
-    def __init__(self, cf_template):
+    def __init__(self, cf_template, **kwargs):
         """
         Instantiates a new Troposphere Template based on an existing
         Cloudformation Template.
         """
         super(TemplateGenerator, self).__init__()
+        if 'CustomMembers' in kwargs:
+            self._custom_members = set(kwargs["CustomMembers"])
+
         self._reference_map = {}
         if 'AWSTemplateFormatVersion' in cf_template:
             self.add_version(cf_template['AWSTemplateFormatVersion'])
+        if 'Transform' in cf_template:
+            self.add_transform(cf_template['Transform'])
         if 'Description' in cf_template:
             self.add_description(cf_template['Description'])
         if 'Metadata' in cf_template:
@@ -55,7 +67,10 @@ class TemplateGenerator(Template):
         for k, v in cf_template.get('Conditions', {}).iteritems():
             self.add_condition(k, self._convert_definition(v, k))
         for k, v in cf_template.get('Resources', {}).iteritems():
-            self.add_resource(self._convert_definition(v, k))
+            self.add_resource(self._convert_definition(
+                                    v, k,
+                                    self._get_resource_type_cls(k, v)
+            ))
         for k, v in cf_template.get('Outputs', {}).iteritems():
             self.add_output(self._create_instance(Output, v, k))
 
@@ -74,35 +89,74 @@ class TemplateGenerator(Template):
     def inspect_resources(self):
         """ Returns a map of `ResourceType: ResourceClass` """
         if not self._inspect_resources:
-            TemplateGenerator._inspect_resources = {
-                m.resource_type: m
-                for m in self.inspect_members
-                if issubclass(
-                    m, (AWSObject, cloudformation.AWSCustomObject)) and
-                hasattr(m, 'resource_type')}
+            d = {}
+            for m in self.inspect_members:
+                if issubclass(m, (AWSObject, cloudformation.AWSCustomObject)) \
+                        and hasattr(m, 'resource_type'):
+                    d[m.resource_type] = m
+
+            TemplateGenerator._inspect_resources = d
+
         return self._inspect_resources
 
     @property
     def inspect_functions(self):
         """ Returns a map of `FunctionName: FunctionClass` """
         if not self._inspect_functions:
-            TemplateGenerator._inspect_functions = {
-                m.__name__: m for m in self.inspect_members
-                if issubclass(m, AWSHelperFn)}
+            d = {}
+            for m in self.inspect_members:
+                if issubclass(m, AWSHelperFn):
+                    d[m.__name__] = m
+
+            TemplateGenerator._inspect_functions = d
+
         return self._inspect_functions
 
-    def _convert_definition(self, definition, ref=None):
+    def _get_resource_type_cls(self, name, resource):
+        """Attempts to return troposphere class that represents Type of
+        provided resource. Attempts to find the troposphere class who's
+        `resource_type` field is the same as the provided resources `Type`
+        field.
+
+        :param resource: Resource to find troposphere class for
+        :return: None: If no class found for provided resource
+                 type: Type of provided resource
+        :raise ResourceTypeNotDefined:
+                  Provided resource does not have a `Type` field
+        """
+        # If provided resource does not have `Type` field
+        if 'Type' not in resource:
+            raise ResourceTypeNotDefined(name)
+
+        # Attempt to find troposphere resource with:
+        #   `resource_type` == resource['Type']
+        try:
+            return self.inspect_resources[resource['Type']]
+        except KeyError:
+            # is there a custom mapping?
+            for custom_member in self._custom_members:
+                if custom_member.resource_type == resource['Type']:
+                    return custom_member
+            # If no resource with `resource_type` == resource['Type'] found
+            return None
+
+    def _convert_definition(self, definition, ref=None, cls=None):
         """
         Converts any object to its troposphere equivalent, if applicable.
         This function will recurse into lists and mappings to create
         additional objects as necessary.
+
+        :param {*} definition: Object to convert
+        :param str ref: Name of key in parent dict that the provided definition
+                        is from, can be None
+        :param type cls: Troposphere class which represents provided definition
         """
         if isinstance(definition, Mapping):
             if 'Type' in definition:  # this is an AWS Resource
                 expected_type = None
-                try:
-                    expected_type = self.inspect_resources[definition['Type']]
-                except KeyError:
+                if cls is not None:
+                    expected_type = cls
+                else:
                     # if the user uses the custom way to name custom resources,
                     # we'll dynamically create a new subclass for this use and
                     # pass that instead of the typical CustomObject resource
@@ -110,7 +164,14 @@ class TemplateGenerator(Template):
                         expected_type = self._generate_custom_type(
                             definition['Type'])
                     except TypeError:
-                        assert not expected_type
+                        # If definition['Type'] turns out not to be a custom
+                        # type (aka doesn't start with "Custom::")
+                        if ref is not None:
+                            raise ResourceTypeNotFound(ref, definition['Type'])
+                        else:
+                            # Make sure expected_type is nothing (as
+                            # it always should be)
+                            assert not expected_type
 
                 if expected_type:
                     args = self._normalize_properties(definition)
@@ -124,8 +185,10 @@ class TemplateGenerator(Template):
                         function_type, definition.values()[0])
 
             # nothing special here - return as dict
-            return {k: self._convert_definition(v)
-                    for k, v in definition.iteritems()}
+            d = {}
+            for k, v in definition.iteritems():
+                d[k] = self._convert_definition(v)
+            return d
 
         elif (isinstance(definition, Sequence) and
                 not isinstance(definition, basestring)):
@@ -158,7 +221,8 @@ class TemplateGenerator(Template):
                     args = [args]
                 return [self._create_instance(cls[0], v) for v in args]
 
-        if isinstance(cls, Sequence) or cls not in self.inspect_members:
+        if isinstance(cls, Sequence)\
+           or cls not in self.inspect_members.union(self._custom_members):
             # this object doesn't map to any known object. could be a string
             # or int, or a Ref... or a list of types such as
             # [basestring, FindInMap, Ref] or maybe a
@@ -169,12 +233,21 @@ class TemplateGenerator(Template):
             # special handling for functions, we want to handle it before
             # entering the other conditions.
             try:
+                if issubclass(cls, Tags):
+                    arg_dict = {}
+                    for d in args:
+                        arg_dict[d['Key']] = d['Value']
+                    return cls(arg_dict)
+
                 if (isinstance(args, Sequence) and
                         not isinstance(args, basestring)):
                     return cls(*self._convert_definition(args))
 
                 if issubclass(cls, autoscaling.Metadata):
                     return self._generate_autoscaling_metadata(cls, args)
+
+                if issubclass(cls, Export):
+                    return cls(args['Name'])
 
                 args = self._convert_definition(args)
                 if isinstance(args, Ref) and issubclass(cls, Ref):
@@ -218,6 +291,8 @@ class TemplateGenerator(Template):
             if isinstance(args, Ref):
                 # use the returned ref instead of creating a new object
                 return args
+            if isinstance(args, AWSHelperFn):
+                return self._convert_definition(kwargs)
             assert isinstance(args, Mapping)
             return cls(title=ref, **args)
 
@@ -307,12 +382,12 @@ class TemplateGenerator(Template):
 
     def _import_all_troposphere_modules(self):
         """ Imports all troposphere modules and returns them """
+        dirname = os.path.join(os.path.dirname(__file__))
         module_names = [
             pkg_name
             for importer, pkg_name, is_pkg in
-            pkgutil.walk_packages(__file__)
-            if not is_pkg and pkg_name.startswith("troposphere") and
-            pkg_name not in self.DEPRECATED_MODULES]
+            pkgutil.walk_packages([dirname], prefix="troposphere.")
+            if not is_pkg and pkg_name not in self.EXCLUDE_MODULES]
         module_names.append('troposphere')
 
         modules = []
@@ -328,3 +403,20 @@ class TemplateGenerator(Template):
                 module, members_predicate)))
 
         return set(members)
+
+
+class ResourceTypeNotFound(Exception):
+
+    def __init__(self, resource, resource_type):
+        Exception.__init__(self,
+                           "ResourceType not found for " +
+                           resource_type + " - " + resource)
+        self.resource_type = resource_type
+        self.resource = resource
+
+
+class ResourceTypeNotDefined(Exception):
+
+    def __init__(self, resource):
+        Exception.__init__(self, "ResourceType not defined for " + resource)
+        self.resource = resource

@@ -1,5 +1,6 @@
 from . import AWSObject, AWSProperty
-from .validators import positive_integer
+from .validators import integer_list_item
+from .constants import LOGS_ALLOWED_RETENTION_DAYS as RETENTION_DAYS
 
 
 class Destination(AWSObject):
@@ -17,7 +18,8 @@ class LogGroup(AWSObject):
     resource_type = "AWS::Logs::LogGroup"
 
     props = {
-        'RetentionInDays': (positive_integer, False),
+        'LogGroupName': (basestring, False),
+        'RetentionInDays': (integer_list_item(RETENTION_DAYS), False),
     }
 
 
@@ -32,6 +34,7 @@ class LogStream(AWSObject):
 
 class MetricTransformation(AWSProperty):
     props = {
+        'DefaultValue': (float, False),
         'MetricName': (basestring, True),
         'MetricNamespace': (basestring, True),
         'MetricValue': (basestring, True),

@@ -3,91 +3,116 @@
 #
 # See LICENSE file for full license.
 
-import warnings
-
-from . import AWSHelperFn, AWSObject, AWSProperty
-
-warnings.warn("This module is outdated and will be replaced with "
-              "troposphere.dynamodb2. Please see the README for "
-              "instructions on how to prepare for this change.")
+from . import AWSObject, AWSProperty, AWSHelperFn, If, Tags
+from .validators import boolean
 
 
-class AttributeDefinition(AWSHelperFn):
-    def __init__(self, name, type):
-        self.data = {
-            'AttributeName': name,
-            'AttributeType': type,
-        }
-
-    def JSONrepr(self):
-        return self.data
+def attribute_type_validator(x):
+    valid_types = ["S", "N", "B"]
+    if x not in valid_types:
+        raise ValueError("AttributeType must be one of: %s" %
+                         ", ".join(valid_types))
+    return x
 
 
-class Key(AWSProperty):
-    def __init__(self, AttributeName, KeyType):
-        self.data = {
-            'AttributeName': AttributeName,
-            'KeyType': KeyType,
-        }
-
-    def JSONrepr(self):
-        return self.data
+def key_type_validator(x):
+    valid_types = ["HASH", "RANGE"]
+    if x not in valid_types:
+        raise ValueError("KeyType must be one of: %s" % ", ".join(valid_types))
+    return x
 
 
-class ProvisionedThroughput(AWSHelperFn):
-    def __init__(self, ReadCapacityUnits, WriteCapacityUnits):
-        self.data = {
-            'ReadCapacityUnits': ReadCapacityUnits,
-            'WriteCapacityUnits': WriteCapacityUnits,
-        }
-
-    def JSONrepr(self):
-        return self.data
+def projection_type_validator(x):
+    valid_types = ["KEYS_ONLY", "INCLUDE", "ALL"]
+    if x not in valid_types:
+        raise ValueError("ProjectionType must be one of: %s" %
+                         ", ".join(valid_types))
+    return x
 
 
-class Projection(AWSHelperFn):
-    def __init__(self, ProjectionType, NonKeyAttributes=None):
-        self.data = {
-            'ProjectionType': ProjectionType
-        }
-        if NonKeyAttributes is not None:
-            self.data['NonKeyAttributes'] = NonKeyAttributes
-
-    def JSONrepr(self):
-        return self.data
+def billing_mode_validator(x):
+    valid_modes = ['PROVISIONED', 'PAY_PER_REQUEST']
+    if x not in valid_modes:
+        raise ValueError("Table billing mode must be one of: %s" %
+                         ", ".join(valid_modes))
+    return x
 
 
-class GlobalSecondaryIndex(AWSHelperFn):
-    def __init__(self, IndexName, KeySchema, Projection,
-                 ProvisionedThroughput):
-        self.data = {
-            'IndexName': IndexName,
-            'KeySchema': KeySchema,
-            'Projection': Projection,
-            'ProvisionedThroughput': ProvisionedThroughput,
-        }
-
-    def JSONrepr(self):
-        return self.data
+class AttributeDefinition(AWSProperty):
+    props = {
+        "AttributeName": (basestring, True),
+        "AttributeType": (attribute_type_validator, True),
+    }
 
 
-class LocalSecondaryIndex(AWSHelperFn):
-    def __init__(self, IndexName, KeySchema, Projection,
-                 ProvisionedThroughput):
-        self.data = {
-            'IndexName': IndexName,
-            'KeySchema': KeySchema,
-            'Projection': Projection,
-        }
+class KeySchema(AWSProperty):
+    props = {
+        "AttributeName": (basestring, True),
+        "KeyType": (key_type_validator, True)
+    }
 
-    def JSONrepr(self):
-        return self.data
+
+class Key(KeySchema):
+    """ For backwards compatibility. """
+    pass
+
+
+class ProvisionedThroughput(AWSProperty):
+    props = {
+        "ReadCapacityUnits": (int, True),
+        "WriteCapacityUnits": (int, True),
+    }
+
+
+class Projection(AWSProperty):
+    props = {
+        "NonKeyAttributes": ([basestring], False),
+        "ProjectionType": (projection_type_validator, False)
+    }
+
+
+class SSESpecification(AWSProperty):
+    props = {
+        'KMSMasterKeyId': (basestring, False),
+        'SSEEnabled': (boolean, True),
+        'SSEType': (basestring, False),
+    }
+
+
+class GlobalSecondaryIndex(AWSProperty):
+    props = {
+        "IndexName": (basestring, True),
+        "KeySchema": ([KeySchema], True),
+        "Projection": (Projection, True),
+        "ProvisionedThroughput": (ProvisionedThroughput, False)
+    }
+
+
+class LocalSecondaryIndex(AWSProperty):
+    props = {
+        "IndexName": (basestring, True),
+        "KeySchema": ([KeySchema], True),
+        "Projection": (Projection, True),
+    }
+
+
+class PointInTimeRecoverySpecification(AWSProperty):
+    props = {
+        'PointInTimeRecoveryEnabled': (boolean, False),
+    }
 
 
 class StreamSpecification(AWSProperty):
-        props = {
-            'StreamViewType': (basestring, True),
-        }
+    props = {
+        'StreamViewType': (basestring, True),
+    }
+
+
+class TimeToLiveSpecification(AWSProperty):
+    props = {
+        'AttributeName': (basestring, True),
+        'Enabled': (boolean, True),
+    }
 
 
 class Table(AWSObject):
@@ -95,10 +120,56 @@ class Table(AWSObject):
 
     props = {
         'AttributeDefinitions': ([AttributeDefinition], True),
+        'BillingMode': (billing_mode_validator, False),
         'GlobalSecondaryIndexes': ([GlobalSecondaryIndex], False),
-        'KeySchema': ([Key], True),
+        'KeySchema': ([KeySchema], True),
         'LocalSecondaryIndexes': ([LocalSecondaryIndex], False),
-        'ProvisionedThroughput': (ProvisionedThroughput, True),
+        'PointInTimeRecoverySpecification':
+            (PointInTimeRecoverySpecification, False),
+        'ProvisionedThroughput': (ProvisionedThroughput, False),
+        'SSESpecification': (SSESpecification, False),
         'StreamSpecification': (StreamSpecification, False),
         'TableName': (basestring, False),
+        'Tags': (Tags, False),
+        'TimeToLiveSpecification': (TimeToLiveSpecification, False),
     }
+
+    def validate(self):
+        billing_mode = self.properties.get('BillingMode', 'PROVISIONED')
+        indexes = self.properties.get('GlobalSecondaryIndexes', [])
+        tput_props = [self.properties]
+        tput_props.extend([
+            x.properties for x in indexes if not isinstance(x, AWSHelperFn)
+        ])
+
+        def check_if_all(name, props):
+            validated = []
+            for prop in props:
+                is_helper = isinstance(prop.get(name), AWSHelperFn)
+                validated.append(name in prop or is_helper)
+            return all(validated)
+
+        def check_any(name, props):
+            validated = []
+            for prop in props:
+                is_helper = isinstance(prop.get(name), AWSHelperFn)
+                validated.append(name in prop and not is_helper)
+            return any(validated)
+
+        if isinstance(billing_mode, If):
+            if check_any('ProvisionedThroughput', tput_props):
+                raise ValueError(
+                    'Table billing mode is per-request. '
+                    'ProvisionedThroughput property is mutually exclusive')
+            return
+
+        if billing_mode == 'PROVISIONED':
+            if not check_if_all('ProvisionedThroughput', tput_props):
+                raise ValueError(
+                    'Table billing mode is provisioned. '
+                    'ProvisionedThroughput required if available')
+        elif billing_mode == 'PAY_PER_REQUEST':
+            if check_any('ProvisionedThroughput', tput_props):
+                raise ValueError(
+                    'Table billing mode is per-request. '
+                    'ProvisionedThroughput property is mutually exclusive')

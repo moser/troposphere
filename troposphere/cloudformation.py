@@ -3,8 +3,9 @@
 #
 # See LICENSE file for full license.
 
-from . import AWSHelperFn, AWSObject, AWSProperty, BaseAWSObject
-from .validators import integer, boolean, encoding
+from . import AWSHelperFn, AWSObject, AWSProperty, BaseAWSObject, Tags
+from . import encode_to_dict
+from .validators import boolean, check_required, encoding, integer
 
 
 class Stack(AWSObject):
@@ -13,6 +14,7 @@ class Stack(AWSObject):
     props = {
         'NotificationARNs': ([basestring], False),
         'Parameters': (dict, False),
+        'Tags': ((Tags, list), False),
         'TemplateURL': (basestring, True),
         'TimeoutInMinutes': (integer, False),
     }
@@ -35,9 +37,21 @@ class WaitCondition(AWSObject):
 
     props = {
         'Count': (integer, False),
-        'Handle': (basestring, True),
-        'Timeout': (integer, True),
+        'Handle': (basestring, False),
+        'Timeout': (integer, False),
     }
+
+    def validate(self):
+        if 'CreationPolicy' in self.resource:
+            for k in self.props.keys():
+                if k in self.properties:
+                    raise ValueError(
+                        "Property %s cannot be specified with CreationPolicy" %
+                        k
+                    )
+        else:
+            required = ['Handle', 'Timeout']
+            check_required(self.__class__.__name__, self.properties, required)
 
 
 class WaitConditionHandle(AWSObject):
@@ -50,19 +64,16 @@ class Metadata(AWSHelperFn):
     def __init__(self, *args):
         self.data = args
 
-    def JSONrepr(self):
+    def to_dict(self):
         t = []
         for i in self.data:
-            t += i.JSONrepr().items()
+            t += encode_to_dict(i).items()
         return dict(t)
 
 
 class InitFileContext(AWSHelperFn):
     def __init__(self, data):
         self.data = data
-
-    def JSONrepr(self):
-        return self.data
 
 
 class InitFile(AWSProperty):
@@ -88,9 +99,6 @@ class InitFiles(AWSHelperFn):
             if not isinstance(data[k], InitFile):
                 raise ValueError("File '" + k + "' must be of type InitFile")
 
-    def JSONrepr(self):
-        return self.data
-
 
 class InitService(AWSProperty):
     props = {
@@ -115,9 +123,6 @@ class InitServices(AWSHelperFn):
                     "Service '" + k + "' must be of type InitService"
                 )
 
-    def JSONrepr(self):
-        return self.data
-
 
 class InitConfigSets(AWSHelperFn):
     def __init__(self, **kwargs):
@@ -128,9 +133,6 @@ class InitConfigSets(AWSHelperFn):
         for k, v in config_sets.iteritems():
             if not isinstance(v, list):
                 raise ValueError('configSets values must be of type list')
-
-    def JSONrepr(self):
-        return self.data
 
 
 class InitConfig(AWSProperty):
@@ -178,9 +180,6 @@ class Authentication(AWSHelperFn):
                     ' cloudformation.AuthenticationBlock'
                 )
 
-    def JSONrepr(self):
-        return self.data
-
 
 class Init(AWSHelperFn):
     def __init__(self, data, **kwargs):
@@ -210,5 +209,14 @@ class Init(AWSHelperFn):
                     'config property must be of type cloudformation.InitConfig'
                 )
 
-    def JSONrepr(self):
-        return self.data
+
+class Macro(AWSCustomObject):
+    resource_type = "AWS::CloudFormation::Macro"
+
+    props = {
+        'Description': (basestring, False),
+        'FunctionName': (basestring, True),
+        'LogGroupName': (basestring, False),
+        'LogRoleARN': (basestring, False),
+        'Name': (basestring, True),
+    }

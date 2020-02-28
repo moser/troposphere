@@ -5,6 +5,7 @@
 
 # Packages
 *.egg
+*.eggs
 *.egg-info
 dist
 build
@@ -34,6 +35,20 @@ nosetests.xml
 .project
 .pydevproject
 .idea
+.venv
 
 # Vim
 *.sw*
+
+# Jetbrains
+*.iml
+
+# Git
+*.diff
+*.patch
+
+# Sphinx
+docs/_build/
+
+# VSCode
+.vscode

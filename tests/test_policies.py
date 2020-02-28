@@ -1,15 +1,15 @@
-import json
 import unittest
 
-from troposphere import awsencode, Parameter, Ref
+from troposphere import Parameter, Ref
 from troposphere.autoscaling import AutoScalingGroup
 from troposphere.policies import CreationPolicy, ResourceSignal, UpdatePolicy
+from troposphere.policies import AutoScalingCreationPolicy
 from troposphere.policies import AutoScalingRollingUpdate
 
 
 class TestCreationPolicy(unittest.TestCase):
 
-    def test_pausetime(self):
+    def test_invalid_pausetime(self):
         with self.assertRaises(ValueError):
             CreationPolicy(ResourceSignal=ResourceSignal(Count=2,
                                                          Timeout='90'))
@@ -31,14 +31,45 @@ class TestCreationPolicy(unittest.TestCase):
                 Timeout='PT10M'
             )
         )
-        p = json.loads(json.dumps(policy, cls=awsencode))
+        p = policy.to_dict()
         self.assertEqual(p['ResourceSignal']['Count'], 2)
         self.assertEqual(p['ResourceSignal']['Timeout'], 'PT10M')
+
+    def test_auto_scaling_creation_policy(self):
+        policy = CreationPolicy(
+            AutoScalingCreationPolicy=AutoScalingCreationPolicy(
+                MinSuccessfulInstancesPercent=50,
+            ),
+            ResourceSignal=ResourceSignal(
+                Count=2,
+                Timeout='PT10M'
+            )
+        )
+        self.assertEqual(
+            policy.AutoScalingCreationPolicy.MinSuccessfulInstancesPercent,
+            50
+        )
+
+    def test_auto_scaling_creation_policy_json(self):
+        policy = CreationPolicy(
+            AutoScalingCreationPolicy=AutoScalingCreationPolicy(
+                MinSuccessfulInstancesPercent=50,
+            ),
+            ResourceSignal=ResourceSignal(
+                Count=2,
+                Timeout='PT10M'
+            )
+        )
+        p = policy.to_dict()
+        self.assertEqual(
+            p['AutoScalingCreationPolicy']['MinSuccessfulInstancesPercent'],
+            50
+        )
 
 
 class TestUpdatePolicy(unittest.TestCase):
 
-    def test_pausetime(self):
+    def test_invalid_pausetime(self):
         with self.assertRaises(ValueError):
             UpdatePolicy(AutoScalingRollingUpdate=AutoScalingRollingUpdate(
                 PauseTime='90'
@@ -122,7 +153,7 @@ class TestUpdatePolicy(unittest.TestCase):
                 MinInstancesInService=1,
                 PauseTime='PT90S',
                 WaitOnResourceSignals=True))
-        p = json.loads(json.dumps(p, cls=awsencode))
+        p = p.to_dict()
         self.assertEqual(p['AutoScalingRollingUpdate']['MaxBatchSize'], 2)
         self.assertEqual(
             p['AutoScalingRollingUpdate']['MinInstancesInService'], 1

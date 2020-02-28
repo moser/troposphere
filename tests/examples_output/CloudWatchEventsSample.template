@@ -26,6 +26,53 @@
                 "Runtime": "nodejs"
             },
             "Type": "AWS::Lambda::Function"
+        },
+        "FoobarPermission": {
+            "Properties": {
+                "Action": "lambda:invokeFunction",
+                "FunctionName": {
+                    "Ref": "FoobarFunction"
+                },
+                "Principal": "events.amazonaws.com",
+                "SourceArn": {
+                    "Fn::GetAtt": [
+                        "FoobarRule",
+                        "Arn"
+                    ]
+                }
+            },
+            "Type": "AWS::Lambda::Permission"
+        },
+        "FoobarRule": {
+            "Properties": {
+                "Description": "Foobar CloudWatch Event",
+                "EventPattern": {
+                    "detail": {
+                        "state": [
+                            "stopping"
+                        ]
+                    },
+                    "detail-type": [
+                        "EC2 Instance State-change Notification"
+                    ],
+                    "source": [
+                        "aws.ec2"
+                    ]
+                },
+                "State": "ENABLED",
+                "Targets": [
+                    {
+                        "Arn": {
+                            "Fn::GetAtt": [
+                                "FoobarFunction",
+                                "Arn"
+                            ]
+                        },
+                        "Id": "FooBarFunction1"
+                    }
+                ]
+            },
+            "Type": "AWS::Events::Rule"
         }
     }
 }
